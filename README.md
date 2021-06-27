@@ -1,5 +1,3 @@
-# NonParametrics-Project-1
-Project #1 for sta 137 Nonparametric Tests
 
 TOPIC I
 Subtopic 1: Permutation test for variance
