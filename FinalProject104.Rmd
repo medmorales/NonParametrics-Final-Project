@@ -1,0 +1,429 @@
+---
+title: "Project#2"
+author: "Miguel Morales"
+date: "12/13/2020"
+output: html_document
+---
+
+```{r}
+some.numbers = c(1,4,6,6,7,25,13,13,12,14,16,14)
+some.groups = rep(c("A","B"),times = c(6,6))
+dat.data = data.frame(numbers = some.numbers,groups = some.groups)
+dat.data
+```
+
+```{r}
+all.perms = sapply(1:3000, function(i){
+  the.numbers <- dat.data$numbers
+  the.groups <- dat.data$groups
+  new.labels <- sample(the.groups,length(the.groups),replace = FALSE) # shuffles groups
+  group.1.var = var(the.numbers[new.labels == levels(the.groups)[1]]) # finds var for group 1
+  group.2.var = var(the.numbers[new.labels == levels(the.groups)[2]]) # finds var for group 2
+  difference.in.vars= group.1.var-group.2.var #finds difference in var
+  return(difference.in.vars)
+})
+head(all.perms)
+hist(all.perms)
+```
+
+
+```{r}
+sample.vars = aggregate(numbers ~ groups,dat.data,var)[,2] # finds var per group
+sample.vars
+difference = sample.vars[1] - sample.vars[2]
+difference
+```
+
+```{r}
+p.value.two = mean(abs(all.perms) >= abs(difference)) #calculates two-sided p-value
+p.value.less = mean(all.perms <= difference) #calculates p-value for "less than" alternative
+p.value.greater = mean(all.perms >= difference) #calculates p-value for "greater than" alternative
+p.value.two<- rbind(p.value.two)
+rownames(p.value.two)<-c("p-value =")
+p.value.two
+```
+
+
+```{r}
+sample.vars<-rbind(sample.vars)
+rownames(sample.vars)<- c("Variance of both groups")
+colnames(sample.vars)<- c("Group 1", "Group 2")
+sample.vars
+
+difference<-rbind(difference)
+rownames(difference)<- c("Difference in Variance")
+difference
+```
+
+
+
+
+CREATE NEW DATA FRAME W/O THE ROWS THAT CONTAIN NA
+```{r}
+library(dplyr)
+crowdedness<-read.csv("~/Downloads/crowdedness.csv")
+crowdedness
+crowdedness <-subset(crowdedness, select=c("Crowdedness","GDP"))
+colSums(is.na(crowdedness))
+
+crowdedness<- na.omit(crowdedness)
+crowdedness
+```
+
+```{r}
+plot(Crowdedness~GDP, crowdedness, main= "Crowdedness vs GDP")
+```
+
+
+```{r}
+library(KernSmooth)
+
+makeKernelSmoother <- function(bw, mydata){
+  fit.kernel <- locpoly(mydata$GDP,mydata$Crowdedness, degree = 0, bandwidth = bw)
+  #range.x = range(crowdedness$GDP)
+  return(fit.kernel) 
+}
+
+estPhiHat <- function(x, fit.kernel){
+  ind.closest.x <- which.min(abs(fit.kernel$x-x))
+  fit.kernel$y[ind.closest.x]
+}
+```
+
+KERNEL SMOOTHING GRAPH
+```{r}
+bws <- seq(2000, 5000, by = 1000)
+
+plot(Crowdedness~GDP,crowdedness,  main= "Kernel smoothers on Crowdedness~GDP",col = rgb(0,0,0, .5))
+
+i<-1
+for(mybws in bws){
+  kern<-makeKernelSmoother(mybws, crowdedness)
+  lines(kern, type = "l", col = i)
+  i<-i+1
+}
+legend("topright", legend = bws, col = 1:6, lty = 1)
+```
+
+CALCULATE MSPE
+```{r}
+calcTestMSPE <- function(testdata, fit_train){
+  yhats_test <- sapply(testdata$GDP, estPhiHat, fit.kernel = fit_train)
+  MSPEs<-mean((testdata$Crowdedness - yhats_test)^2)
+  return(MSPEs)
+}
+
+
+n <- nrow(crowdedness)
+k <- 10
+
+set.seed(77)
+
+folds <- cut(1:n, breaks = k, labels = FALSE)
+folds <- sample(folds)
+
+kCV_MSPE.1 <- rep(NA,k)
+kCV_MSPE.2 <- rep(NA,k)
+kCV_MSPE.3 <- rep(NA,k)
+kCV_MSPE.4 <- rep(NA,k)
+kCV_MSPE.5 <- rep(NA,k)
+
+for(current_k in 1:k){
+  
+  test <- crowdedness[folds==current_k, ]
+  train <- crowdedness[folds!=current_k, ]
+
+  fit_train_1 <- makeKernelSmoother(1000, train)
+  fit_train_2 <- makeKernelSmoother(2000, train)
+  fit_train_3 <- makeKernelSmoother(3000, train)
+  fit_train_4 <- makeKernelSmoother(4000, train)
+  fit_train_5 <- makeKernelSmoother(5000, train)
+  
+  MSPE.1 <- calcTestMSPE(testdata =test,fit_train_1) 
+  MSPE.2 <- calcTestMSPE(testdata =test,fit_train_2)
+  MSPE.3 <- calcTestMSPE(testdata =test,fit_train_3)
+  MSPE.4 <- calcTestMSPE(testdata =test,fit_train_4)
+  MSPE.5 <- calcTestMSPE(testdata =test,fit_train_5)
+  
+  kCV_MSPE.1[current_k] <- MSPE.1
+  kCV_MSPE.2[current_k] <- MSPE.2
+  kCV_MSPE.3[current_k] <- MSPE.3
+  kCV_MSPE.4[current_k] <- MSPE.4
+  kCV_MSPE.5[current_k] <- MSPE.5
+}
+
+mean(kCV_MSPE.1)
+mean(kCV_MSPE.2)
+mean(kCV_MSPE.3)
+mean(kCV_MSPE.4)
+mean(kCV_MSPE.5)
+```
+
+SORT INTO NEAT TABLE
+```{r}
+foldmspes<-rbind(mean(kCV_MSPE.1),mean(kCV_MSPE.2),mean(kCV_MSPE.3),mean(kCV_MSPE.4),mean(kCV_MSPE.5))
+colnames(foldmspes)<- c("10-fold mspe")
+rownames(foldmspes) <-c("bw 2000:", "bw 4000:", "bw 6000:", "bw 8000:","bw 10000:") 
+foldmspes
+```
+
+ESTIMATES OF MISSING VALUES 
+```{r}
+bw5<- makeKernelSmoother(10000, crowdedness)
+est878<-estPhiHat(878,bw5)
+est5945<-estPhiHat(5945,bw5)
+estimations1<-rbind(est878,est5945)
+rownames(estimations1)<-c(" at GDP = 878", " at GDP = 5945")
+colnames(estimations1)<-c("Crowdedness Estimation")
+estimations1
+```
+
+LOESS SMOOTHING
+```{r}
+s= k/n
+s
+
+fit.loess1 <- loess(Crowdedness ~ GDP, crowdedness, degree = 1,span = .3)
+fit.loess2 <- loess(Crowdedness ~ GDP, crowdedness, degree = 1,span = .4)
+fit.loess3 <- loess(Crowdedness ~ GDP, crowdedness, degree = 1,span = .5)
+fit.loess4 <- loess(Crowdedness ~ GDP, crowdedness, degree = 1,span = .6)
+fit.loess5 <- loess(Crowdedness ~ GDP, crowdedness, degree = 1,span = .7)
+
+xrange <- range(crowdedness$GDP)
+xgrid <- seq(xrange[1], xrange[2], length = 100)
+yhats.loess1 <- predict(fit.loess1, data.frame(GDP = xgrid))
+yhats.loess2 <- predict(fit.loess2, data.frame(GDP = xgrid))
+yhats.loess3 <- predict(fit.loess3, data.frame(GDP = xgrid))
+yhats.loess4 <- predict(fit.loess4, data.frame(GDP = xgrid))
+yhats.loess5 <- predict(fit.loess5, data.frame(GDP = xgrid))
+
+bws<-seq(1,5, by =1)
+plot(Crowdedness ~ GDP, crowdedness, main = "Loess curve")
+lines(xgrid, yhats.loess1, col = 1)
+lines(xgrid, yhats.loess2, col = 2)
+lines(xgrid, yhats.loess3, col = 3)
+lines(xgrid, yhats.loess4, col = 4)
+lines(xgrid, yhats.loess5, col = 5)
+legend("topright", legend = bws, col = 1:6, lty = 1)
+```
+
+```{r}
+# k-fold subsetting
+n <- nrow(crowdedness)
+n.train <- round(n*.7)
+n.test <- n - n.train
+
+inds.train <- sample(1:n, size = n.train)
+inds.test <- (1:n)[-inds.train]
+
+k <- 10
+folds <- cut(1:n, breaks = k, labels = FALSE)
+
+crowdedness.train <- crowdedness[inds.train,]
+crowdedness.test <- crowdedness[inds.test,]
+
+yhats_test1 <- predict(fit.loess1, crowdedness.test)
+yhats_test2 <- predict(fit.loess2, crowdedness.test)
+yhats_test3 <- predict(fit.loess3, crowdedness.test)
+yhats_test4 <- predict(fit.loess4, crowdedness.test)
+yhats_test5 <- predict(fit.loess5, crowdedness.test)
+
+loess1<-mean((crowdedness.test$Crowdedness - yhats_test1)^2)
+loess2<-mean((crowdedness.test$Crowdedness - yhats_test2)^2)
+loess3<mean((crowdedness.test$Crowdedness - yhats_test3)^2)
+loess4<-mean((crowdedness.test$Crowdedness - yhats_test4)^2)
+loess5<-mean((crowdedness.test$Crowdedness - yhats_test5)^2)
+
+
+loessmspe<-rbind(loess1,loess2, loess3, loess4, loess5)
+rownames(loessmspe)<- c("s = .3","s = .4","s = .5","s = .6","s = .7")
+colnames(loessmspe)<- c("MSPE")
+loessmspe
+```
+
+```{r}
+loess878<-predict(fit.loess4, newdata = data.frame(GDP = 878))
+loess5945<-predict(fit.loess4, newdata = data.frame(GDP = 5945))
+
+
+rbinds<- rbind(loess878,loess5945) 
+rbinds
+```
+
+```{r}
+crowdedness<-read.csv("~/Downloads/crowdedness.csv")
+
+crowdedness <-subset(crowdedness, select=c("fertility","GDP"))
+
+colSums(is.na(crowdedness))
+
+crowdedness<- na.omit(crowdedness)
+head(crowdedness)
+
+boxplot(crowdedness$fertility,main="Boxplot fertility")
+```
+
+```{r}
+set.seed(77)
+fit.mlr <- lm(DH ~ MH + FH, daughters)
+es.mlr <- fit.mlr$residuals
+hist(es.mlr)
+```
+
+
+```{r}
+findTheta <- function(x,y){
+  cor(x,y)
+}
+rho.obs <- findTheta(crowdedness$GDP, crowdedness$fertility)
+
+# Obtain bootstrapped rho*'s
+B <- 4000
+n <- nrow(crowdedness)
+
+set.seed(77)
+boot.thetas <- rep(NA, B)
+for(b in 1:B){
+  boot.inds <- sample(1:n, replace = TRUE)
+  boot.sample <- crowdedness[boot.inds,]
+  boot.thetas[b] <- findTheta(boot.sample$GDP, boot.sample$fertility)
+}
+
+hist(boot.thetas, main = "Histogram of bootstrapped rho")
+```
+
+```{r}
+# percentile rho
+percentileCI<- rbind(quantile(boot.thetas, c(0.025, .975)))
+rownames(percentileCI)<- c("Percentile CI")
+percentileCI
+```
+
+```{r}
+# bca rho
+alpha <- 0.05
+po<-mean(boot.thetas<=rho.obs)
+Z0<-qnorm(po)
+Za<-qnorm(1-alpha/2)
+
+leave.one.out.theta = sapply(1:nrow(crowdedness),function(i){
+  leave.out.data = crowdedness[-i,c('GDP','fertility')]
+  cor(leave.out.data$GDP,leave.out.data$fertility)
+})
+theta.minus.one = mean(leave.one.out.theta)
+a = sum( (theta.minus.one - leave.one.out.theta)^3)/( 6 *(sum( (theta.minus.one - leave.one.out.theta)^2))^(3/2) )
+Zu = (Z0+Za)/(1-a*(Z0+Za)) + Z0 #upper limit for Z
+Zl = (Z0-Za)/(1-a*(Z0-Za)) + Z0 #Lower limit for Z
+lower.percentile = pnorm(Zl,lower.tail = TRUE) #percentile for Z
+upper.percentile = pnorm(Zu,lower.tail = TRUE) #percentile for Z
+ci.bca = rbind(as.numeric(quantile(boot.thetas,c(lower.percentile,upper.percentile))))
+rownames(ci.bca)<-c("BCA CI")
+colnames(ci.bca)<-c("Lower", "Upper")
+ci.bca
+```
+
+```{r}
+rbind(percentileCI,ci.bca)
+```
+
+# either work because distribution of rho is equal
+
+```{r}
+set.seed(77)
+fit.slr <- lm(GDP ~ fertility, crowdedness)
+beta1_hat <- fit.slr$coefficients["fertility"]
+beta1_hat
+es <- fit.slr$residuals
+hist(es)
+
+yhats <- fit.slr$fitted.values
+```
+
+```{r}
+# Example of percentile 95% CI SLOPE:
+
+B =10000
+findTheta <- function(mydata){
+  fit.slr <- lm(GDP ~ fertility, mydata)
+  beta1_hat <- fit.slr$coefficients["fertility"]
+  return(beta1_hat)
+}
+
+boot.thetas <- rep(NA, B)
+for(b in 1:B){
+  boot.es <- sample(es, replace = TRUE)
+  boot.ys <- yhats + boot.es
+  boot.sample <- data.frame(fertility = crowdedness$fertility, GDP = boot.ys)
+  boot.thetas[b] <- findTheta(boot.sample)
+}
+
+quantile(boot.thetas, c(0.025, .975))
+```
+
+```{r}
+model <- lm(GDP~fertility,crowdedness)
+boot_reps1<-replicate(10000,{
+  data_boot<-crowdedness[sample(nrow(crowdedness),replace=TRUE),c('fertility','GDP')]
+  model<-lm(GDP ~ fertility, data_boot)
+  return(coefficients(model)['fertility'])
+})
+
+po = mean(boot_reps1 <= coefficients(model)['fertility'])
+Z0 = qnorm(po)
+Za = qnorm(1-alpha/2)
+
+### Estimating a:
+leave.one.out.theta1 = sapply(1:nrow(crowdedness),function(i){
+  leave.out.data = crowdedness[-i,c('fertility','GDP')]
+  model<-lm(GDP~fertility, leave.out.data)
+  return(coefficients(model)['fertility'])
+})
+
+theta.minus.one = mean(leave.one.out.theta1)
+a = sum( (theta.minus.one - leave.one.out.theta1)^3)/( 6 *(sum( (theta.minus.one - leave.one.out.theta1)^2))^(3/2) )
+
+Zu = (Z0+Za)/(1-a*(Z0+Za)) + Z0 #upper limit for Z
+Zl = (Z0-Za)/(1-a*(Z0-Za)) + Z0 #Lower limit for Z
+lower.percentile = pnorm(Zl,lower.tail = TRUE) #percentile for Z
+upper.percentile = pnorm(Zu,lower.tail = TRUE) #percentile for Z
+
+oci.bca = as.numeric(quantile(boot_reps1,c(lower.percentile,upper.percentile)))
+rbind(oci.bca)
+```
+
+```{r}
+oci.bca<-rbind(oci.bca)
+rownames(oci.bca)<-c("BCA CI")
+colnames(oci.bca)<-c("Lower Perc.", "Upper Perc.")
+oci.bca
+```
+
+
+```{r}
+thperc<-quantile(boot_reps1, c(0.025, .975))
+theperc<-rbind(thperc)
+rownames(theperc)<- c("Percentile CI")
+theperc
+
+```
+
+
+```{r}
+#Bootstrap t-pivot method for slope
+se_beta1hat <- summary(fit.slr)$coefficients[2,2]
+
+boot.ts <- rep(NA, B)
+for(b in 1:B){
+  boot.es <- sample(es, replace = TRUE)
+  fit.boot <- lm(boot.es ~ crowdedness$fertility)
+  boot.ts[b] <- summary(fit.boot)$coefficients[2,3]
+}
+
+tquants <- quantile(boot.ts, c(0.975, .025))
+tslope<-beta1_hat - tquants*se_beta1hat
+tslope
+tslope<-rbind(tslope)
+rownames(tslope)<-c("T-Pivot")
+tslope
+```
+
